@@ -58,6 +58,8 @@ static int errorstate = 0;
 
 /* Highest byte (+1) that has been written in the data stream. */
 static uint64_t highestwrite = 0;
+/* Highest byte (+1) that has been read in the data stream. */
+static uint64_t highestread = 0;
 
 /* Called for each key=value passed on the command line. */
 static int
@@ -229,17 +231,9 @@ streaming_pwrite (void *handle, const void *buf,
   return 0;
 }
 
-/* Read data back from the stream. */
-static int
-streaming_pread (void *handle, void *buf, uint32_t count, uint64_t offset)
+/* Allow reads which are entirely >= highestwrite.  These return zeroes. */
+static int stream_zero_pread(void *handle, void *buf, uint32_t count, uint64_t offset)
 {
-  if (errorstate) {
-    nbdkit_error ("unrecoverable error state");
-    errno = EIO;
-    return -1;
-  }
-
-  /* Allow reads which are entirely >= highestwrite.  These return zeroes. */
   if (offset >= highestwrite) {
     memset (buf, 0, count);
     return 0;
@@ -249,6 +243,63 @@ streaming_pread (void *handle, void *buf, uint32_t count, uint64_t offset)
   errorstate = 1;
   errno = EIO;
   return -1;
+}
+
+/* Read data back from the stream. */
+static int
+streaming_pread (void *handle, void *buf, uint32_t count, uint64_t offset)
+{
+  size_t n;
+  ssize_t r;
+
+  if (errorstate) {
+    nbdkit_error ("unrecoverable error state");
+    errno = EIO;
+    return -1;
+  }
+
+  if (!isinput)
+    return stream_zero_pread(handle, buf, count, offset);
+
+  if (offset < highestread) {
+    nbdkit_error ("client tried to seek backwards and read: the streaming plugin does not currently support this");
+    errorstate = 1;
+    errno = EIO;
+    return -1;
+  }
+
+  /* Need to skip some data. */
+  if (offset > highestread) {
+    int64_t size = offset - highestread;
+    char buf[4096];
+
+    while (size > 0) {
+      n = size > sizeof buf ? sizeof buf : size;
+      r = read (fd, buf, n);
+      if (r == -1) {
+        nbdkit_error ("read: %m");
+        errorstate = 1;
+        return -1;
+      }
+      highestread += r;
+      size -= r;
+    }
+  }
+
+  /* Read the data. */
+  while (count > 0) {
+    r = read (fd, buf, count);
+    if (r == -1) {
+      nbdkit_error ("read: %m");
+      errorstate = 1;
+      return -1;
+    }
+    buf += r;
+    highestread += r;
+    count -= r;
+  }
+
+  return 0;
 }
 
 static struct nbdkit_plugin plugin = {
