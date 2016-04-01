@@ -45,6 +45,7 @@
 #include <nbdkit-plugin.h>
 
 static char *filename = NULL;
+static int isinput = 0;
 static int fd = -1;
 
 /* In theory INT64_MAX, but it breaks qemu's NBD driver. */
@@ -111,22 +112,26 @@ static void *
 streaming_open (int readonly)
 {
   void *h;
+  int flags;
 
-  if (readonly) {
-    nbdkit_error ("you cannot use the -r option with the streaming plugin");
-    return NULL;
-  }
+  isinput = readonly;
 
   if (errorstate) {
     nbdkit_error ("unrecoverable error state, no new connections can be opened");
     return NULL;
   }
 
+  flags = O_CLOEXEC|O_NOCTTY;
+  if (readonly)
+    flags |= O_RDONLY;
+  else
+    flags |= O_RDWR;
+
   /* Open the file blindly.  If this fails with ENOENT then we create a
    * FIFO and try again.
    */
  again:
-  fd = open (filename, O_RDWR|O_CLOEXEC|O_NOCTTY);
+  fd = open (filename, flags);
   if (fd == -1) {
     if (errno != ENOENT) {
       nbdkit_error ("open: %s: %m", filename);
@@ -167,6 +172,13 @@ streaming_pwrite (void *handle, const void *buf,
 {
   size_t n;
   ssize_t r;
+
+  if (isinput) {
+    nbdkit_error("client tried to write to readonly stream");
+    errorstate = 1;
+    errno = EIO;
+    return -1;
+  }
 
   if (errorstate) {
     nbdkit_error ("unrecoverable error state");
