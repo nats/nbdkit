@@ -90,23 +90,6 @@ streaming_config_complete (void)
     return -1;
   }
 
-  /* Open the file blindly.  If this fails with ENOENT then we create a
-   * FIFO and try again.
-   */
- again:
-  fd = open (filename, O_RDWR|O_CLOEXEC|O_NOCTTY);
-  if (fd == -1) {
-    if (errno != ENOENT) {
-      nbdkit_error ("open: %s: %m", filename);
-      return -1;
-    }
-    if (mknod (filename, S_IFIFO | 0666, 0) == -1) {
-      nbdkit_error ("mknod: %s: %m", filename);
-      return -1;
-    }
-    goto again;
-  }
-
   return 0;
 }
 
@@ -137,6 +120,23 @@ streaming_open (int readonly)
   if (errorstate) {
     nbdkit_error ("unrecoverable error state, no new connections can be opened");
     return NULL;
+  }
+
+  /* Open the file blindly.  If this fails with ENOENT then we create a
+   * FIFO and try again.
+   */
+ again:
+  fd = open (filename, O_RDWR|O_CLOEXEC|O_NOCTTY);
+  if (fd == -1) {
+    if (errno != ENOENT) {
+      nbdkit_error ("open: %s: %m", filename);
+      return -1;
+    }
+    if (mknod (filename, S_IFIFO | 0666, 0) == -1) {
+      nbdkit_error ("mknod: %s: %m", filename);
+      return -1;
+    }
+    goto again;
   }
 
   /* There is no handle, so return an arbitrary non-NULL pointer. */
