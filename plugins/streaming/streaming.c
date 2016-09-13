@@ -67,7 +67,10 @@ streaming_config (const char *key, const char *value)
 {
   if (strcmp (key, "pipe") == 0) {
     /* See FILENAMES AND PATHS in nbdkit-plugin(3). */
-    filename = nbdkit_absolute_path (value);
+    if (strcmp(value, "-") != 0)
+        filename = nbdkit_absolute_path (value);
+    else
+        filename = strdup(value);
     if (!filename)
       return -1;
   }
@@ -128,6 +131,16 @@ streaming_open (int readonly)
     flags |= O_RDONLY;
   else
     flags |= O_RDWR;
+
+  /* If filename is '-', we just want to read/write to stdin/stdout directly */
+  if (strcmp(filename,"-") == 0) {
+    if (readonly)
+        fd = dup(0);
+    else
+        fd = dup(1);
+    h = &fd;
+    return h;
+  }
 
   /* Open the file blindly.  If this fails with ENOENT then we create a
    * FIFO and try again.
