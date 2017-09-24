@@ -302,6 +302,11 @@ streaming_pread (void *handle, void *buf, uint32_t count, uint64_t offset)
   /* Read the data. */
   while (count > 0) {
     r = read (fd, buf, count);
+    if (r == 0) {
+      nbdkit_error ("read: eof");
+      errorstate = 1;
+      return -1;
+    }
     if (r == -1) {
       nbdkit_error ("read: %m");
       errorstate = 1;
